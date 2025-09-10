@@ -1,4 +1,5 @@
 flask
 ics
 requests
+icalendar
 gunicorn
