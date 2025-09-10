@@ -1,51 +1,71 @@
-import requests
-import datetime
-from ics import Calendar, Event
-from flask import Flask, Response
 import os
+import requests
+from flask import Flask, Response
+from icalendar import Calendar, Event
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# Identifiants stockés dans Render (variables d'environnement)
-USER = os.environ.get("ED_USER")
-PWD = os.environ.get("ED_PASS")
+ED_USER = os.environ.get("ED_USER")
+ED_PASS = os.environ.get("ED_PASS")
 
 def get_edt():
-    # 1. Connexion à l’API
-    login_url = "https://api.ecoledirecte.com/v3/login.awp"
-    data = {"identifiant": USER, "motdepasse": PWD, "isReLogin": False}
-    resp = requests.post(login_url, json=data)
-    token = resp.json()["token"]
-    eleve_id = resp.json()["data"]["accounts"][0]["id"]
+    # URL login avec version obligatoire
+    login_url = "https://api.ecoledirecte.com/v3/login.awp?v=4.63.1"
 
-    # 2. Dates de la semaine courante
-    today = datetime.date.today()
-    lundi = today - datetime.timedelta(days=today.weekday())
-    dimanche = lundi + datetime.timedelta(days=6)
+    data = {"identifiant": ED_USER, "motdepasse": ED_PASS}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0",
+    }
 
-    # 3. Récupérer EDT
-    edt_url = f"https://api.ecoledirecte.com/v3/E/{eleve_id}/emploidutemps.awp?verbe=get"
-    headers = {"X-Token": token}
-    payload = {"dateDebut": str(lundi), "dateFin": str(dimanche)}
-    resp = requests.post(edt_url, headers=headers, json=payload)
-    cours = resp.json()["data"]
+    # Requête de login
+    resp = requests.post(login_url, json=data, headers=headers)
+    print("RAW LOGIN RESPONSE:", resp.text)  # debug
 
-    # 4. Générer calendrier ICS
+    j = resp.json()
+    if "data" not in j or "accounts" not in j["data"] or not j["data"]["accounts"]:
+        raise Exception(f"Login failed: {j}")  # stop si pas d’élève
+
+    eleve_id = j["data"]["accounts"][0]["id"]
+    token = j["token"]
+
+    # Requête emploi du temps
+    edt_url = f"https://api.ecoledirecte.com/v3/E/{eleve_id}/emploidutemps.awp?v=4.63.1&verbe=get"
+    today = datetime.today()
+    start_date = today.strftime("%Y-%m-%d")
+    end_date = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+
+    payload = {"dateDebut": start_date, "dateFin": end_date, "avecTrous": False}
+    headers_edt = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0",
+        "X-Token": token,
+    }
+
+    resp = requests.post(edt_url, json=payload, headers=headers_edt)
+    print("RAW EDT RESPONSE:", resp.text)  # debug
+
+    edt_json = resp.json()
+
+    # Création du calendrier iCal
     cal = Calendar()
-    for c in cours:
-        e = Event()
-        e.name = c.get("matiere", "Cours")
-        e.begin = c["start_date"]
-        e.end = c["end_date"]
-        e.location = c.get("salle", "")
-        cal.events.add(e)
+    for cours in edt_json.get("data", []):
+        event = Event()
+        event.add("summary", cours.get("matiere", "Cours"))
+        start = datetime.strptime(cours["start_date"], "%Y-%m-%d %H:%M:%S")
+        end = datetime.strptime(cours["end_date"], "%Y-%m-%d %H:%M:%S")
+        event.add("dtstart", start)
+        event.add("dtend", end)
+        event.add("location", cours.get("salle", ""))
+        cal.add_component(event)
 
-    return str(cal)
+    return cal
 
 @app.route("/")
 def ics():
     cal = get_edt()
-    return Response(cal, mimetype="text/calendar")
+    return Response(cal.to_ical(), mimetype="text/calendar")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
