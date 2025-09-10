@@ -10,10 +10,17 @@ ED_USER = os.environ.get("ED_USER")
 ED_PASS = os.environ.get("ED_PASS")
 
 def get_edt():
-    # URL login avec version obligatoire
+    # Login URL avec version
     login_url = "https://api.ecoledirecte.com/v3/login.awp?v=4.63.1"
 
-    data = {"identifiant": ED_USER, "motdepasse": ED_PASS}
+    # JSON corrigé pour éviter "Format JSON invalide"
+    data = {
+        "identifiant": ED_USER,
+        "motdepasse": ED_PASS,
+        "isReLogin": False,
+        "device": "web"
+    }
+
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0",
@@ -36,7 +43,12 @@ def get_edt():
     start_date = today.strftime("%Y-%m-%d")
     end_date = (today + timedelta(days=7)).strftime("%Y-%m-%d")
 
-    payload = {"dateDebut": start_date, "dateFin": end_date, "avecTrous": False}
+    payload = {
+        "dateDebut": start_date,
+        "dateFin": end_date,
+        "avecTrous": False
+    }
+
     headers_edt = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0",
